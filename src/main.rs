@@ -3,6 +3,8 @@ use std::{
     io::{self, stdout},
     path::PathBuf,
     process::Command,
+    thread,
+    time::Duration,
 };
 
 use crossterm::{
@@ -10,6 +12,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
+use fork::{fork, Fork};
 use ratatui::{prelude::*, widgets::*};
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +41,7 @@ fn main() -> io::Result<()> {
     let mut should_quit = false;
     while !should_quit {
         terminal.draw(|f| ui(f, &mut data))?;
-        should_quit = handle_events(&mut data)?;
+        should_quit = handle_events(&mut data).unwrap();
     }
 
     disable_raw_mode()?;
@@ -59,13 +62,21 @@ fn handle_events(data: &mut GlobalInfo) -> io::Result<bool> {
             {
                 data.list_pos += 1;
             } else if key.code == KeyCode::Enter {
-                if let Err(e) = Command::new("sh")
-                    .arg("-c")
-                    .arg(data.list[data.list_pos].command.clone())
-                    .spawn()
-                {
-                    eprintln!("Could not launch program {}", e)
+                let command = data.list[data.list_pos].command.clone();
+                match fork() {
+                    Ok(Fork::Parent(child)) => {
+                        println!(
+                            "Continuing execution in parent process, new child has pid: {}",
+                            child
+                        );
+                    }
+                    Ok(Fork::Child) => {
+                        Command::new("sh").arg("-c").arg(command).spawn().unwrap();
+                    }
+                    Err(_) => println!("Fork failed"),
                 }
+                thread::sleep(Duration::from_millis(5000));
+                return Ok(true);
             }
         }
     }
